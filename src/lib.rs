@@ -11,14 +11,17 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Структура транзакцию.
+/// Максимальное количество транзакций в одном блоке.
+pub const MAX_TRANSACTIONS_PER_BLOCK: usize = 10;
+
+/// Структура транзакции.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Transaction {
-    /// Отправитель.
-    pub from: String,
-    /// Получатель.
-    pub to: String,
-    /// Сумма.
+    /// Отправитель (публичный ключ, 32 байта).
+    pub from: [u8; 32],
+    /// Получатель (публичный ключ, 32 байта).
+    pub to: [u8; 32],
+    /// Сумма в минимальных единицах.
     pub amount: u64,
 }
 
@@ -70,15 +73,23 @@ fn current_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("Системное время установлено до Unix-эпохи")
-        .as_secs()
+        .as_nanos() as u64
 }
 
 /// Функция создания нового блока на основе предыдущего.
 fn create_block(transactions: Vec<Transaction>, previous_block: &Block) -> Block {
     let index = previous_block.index + 1;
     let timestamp = current_timestamp();
-    let previous_hash = previous_block.hash;
 
+    // Проверка: новый timestamp должен быть строго больше предыдущего
+    if timestamp <= previous_block.timestamp {
+        panic!(
+            "Некорректный timestamp: {} <= {} (предыдущий блок)",
+            timestamp, previous_block.timestamp
+        );
+    }
+
+    let previous_hash = previous_block.hash;
     let mut block = Block {
         index,
         timestamp,
@@ -127,6 +138,13 @@ impl Blockchain {
 
     /// Добавляет новый блок с заданными транзакциями.
     pub fn add_block(&mut self, transactions: Vec<Transaction>) {
+        if transactions.len() > MAX_TRANSACTIONS_PER_BLOCK {
+            panic!(
+                "Превышено максимальное число транзакций в блоке: {} > {}",
+                transactions.len(),
+                MAX_TRANSACTIONS_PER_BLOCK
+            );
+        }
         let last_block = self.blocks.last().unwrap();
         let new_block = create_block(transactions, last_block);
         self.blocks.push(new_block);
@@ -143,7 +161,12 @@ impl Blockchain {
                 println!("  (нет транзакций)");
             } else {
                 for tx in &block.transactions {
-                    println!("  {} → {} : {}", tx.from, tx.to, tx.amount);
+                    println!(
+                        "  {} → {} : {}",
+                        hex::encode(tx.from),
+                        hex::encode(tx.to),
+                        tx.amount
+                    );
                 }
             }
             println!("Prev: {}", hex::encode(block.previous_hash));
@@ -171,7 +194,6 @@ impl Blockchain {
         if self.blocks.is_empty() {
             return false;
         }
-
         // Проверка генезис-блока
         let genesis = &self.blocks[0];
         if genesis.index != 0 {
@@ -183,12 +205,10 @@ impl Blockchain {
         if genesis.hash != genesis.calculate_hash() {
             return false;
         }
-
         // Проверка остальных блоков
         for i in 1..self.blocks.len() {
             let current = &self.blocks[i];
             let previous = &self.blocks[i - 1];
-
             if current.index != previous.index + 1 {
                 return false;
             }
@@ -204,7 +224,7 @@ impl Blockchain {
 }
 
 /// Модель участников сети (пиров) и консенсуса.
-/// 
+///
 /// Идентификатор пира.
 pub type PeerId = u32;
 
@@ -255,13 +275,11 @@ impl FixedPeerConsensus {
         if self.peers.is_empty() {
             return false;
         }
-
         let approvals = self
             .peers
             .iter()
             .filter(|peer| peer.vote_for_transaction(&transactions))
             .count();
-
         let threshold = self.majority_threshold();
         if approvals > threshold {
             blockchain.add_block(transactions);
@@ -293,12 +311,8 @@ pub fn deserialize_blockchain(bytes: &[u8]) -> Result<Blockchain, bincode::Error
 mod tests {
     use super::*;
 
-    fn dummy_tx(from: &str, to: &str, amount: u64) -> Transaction {
-        Transaction {
-            from: from.to_string(),
-            to: to.to_string(),
-            amount,
-        }
+    fn dummy_tx(from: [u8; 32], to: [u8; 32], amount: u64) -> Transaction {
+        Transaction { from, to, amount }
     }
 
     #[test]
@@ -314,15 +328,15 @@ mod tests {
     #[test]
     fn test_chain_validity_with_real_transactions() {
         let mut chain = Blockchain::new();
-        chain.add_block(vec![dummy_tx("A", "B", 100)]);
-        chain.add_block(vec![dummy_tx("C", "D", 50)]);
+        chain.add_block(vec![dummy_tx([1; 32], [2; 32], 100)]);
+        chain.add_block(vec![dummy_tx([3; 32], [4; 32], 50)]);
         assert!(chain.is_valid());
     }
 
     #[test]
     fn test_chain_becomes_invalid_after_tampering() {
         let mut chain = Blockchain::new();
-        chain.add_block(vec![dummy_tx("X", "Y", 1)]);
+        chain.add_block(vec![dummy_tx([1; 32], [2; 32], 1)]);
         chain.blocks[1].transactions.clear();
         assert!(!chain.is_valid());
     }
@@ -332,7 +346,7 @@ mod tests {
         let mut block = Block {
             index: 1,
             timestamp: 1700000000,
-            transactions: vec![dummy_tx("A", "B", 10)],
+            transactions: vec![dummy_tx([1; 32], [2; 32], 10)],
             previous_hash: [2u8; 32],
             hash: [0u8; 32],
         };
@@ -340,7 +354,6 @@ mod tests {
 
         let serialized = serialize_block(&block).unwrap();
         let deserialized: Block = deserialize_block(&serialized).unwrap();
-
         assert_eq!(block.hash, deserialized.hash);
         assert_eq!(block.transactions, deserialized.transactions);
         assert_eq!(deserialized.hash, deserialized.calculate_hash());
@@ -349,11 +362,9 @@ mod tests {
     #[test]
     fn test_blockchain_serialization_roundtrip() {
         let mut chain = Blockchain::new();
-        chain.add_block(vec![dummy_tx("Sender", "Receiver", 42)]);
-
+        chain.add_block(vec![dummy_tx([5; 32], [6; 32], 42)]);
         let serialized = serialize_blockchain(&chain).unwrap();
         let deserialized: Blockchain = deserialize_blockchain(&serialized).unwrap();
-
         assert_eq!(chain.blocks.len(), deserialized.blocks.len());
         assert!(deserialized.is_valid());
         assert_eq!(chain.blocks[1].hash, deserialized.blocks[1].hash);
@@ -364,7 +375,7 @@ mod tests {
         let peers = vec![Peer::new(1), Peer::new(2), Peer::new(3)];
         let consensus = FixedPeerConsensus::new(peers);
         let mut chain = Blockchain::new();
-        let approved = consensus.propose_block(vec![dummy_tx("P", "Q", 100)], &mut chain);
+        let approved = consensus.propose_block(vec![dummy_tx([1; 32], [2; 32], 100)], &mut chain);
         assert!(approved);
     }
 
@@ -373,7 +384,7 @@ mod tests {
         let peers = vec![Peer::new(1)];
         let consensus = FixedPeerConsensus::new(peers);
         let mut chain = Blockchain::new();
-        let approved = consensus.propose_block(vec![dummy_tx("X", "Y", 1)], &mut chain);
+        let approved = consensus.propose_block(vec![dummy_tx([1; 32], [2; 32], 1)], &mut chain);
         assert!(!approved);
     }
 }

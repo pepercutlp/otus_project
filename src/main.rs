@@ -15,7 +15,6 @@ use rustblockchain::{
 fn main() {
     // 1: Инициализация блокчейна
     println!("Запуск демонстрации блокчейна...\n");
-
     // Создаём новую цепочку с генезис-блоком
     let mut blockchain = Blockchain::new();
     println!("Блокчейн создан!");
@@ -39,47 +38,47 @@ fn main() {
     let transaction_batches = vec![
         vec![
             Transaction {
-                from: "Address1".to_string(),
-                to: "Address2".to_string(),
+                from: [1; 32],
+                to: [2; 32],
                 amount: 52,
             },
             Transaction {
-                from: "Address3".to_string(),
-                to: "Address4".to_string(),
+                from: [3; 32],
+                to: [4; 32],
                 amount: 69,
             },
         ],
         vec![Transaction {
-            from: "Address5".to_string(),
-            to: "Address6".to_string(),
+            from: [5; 32],
+            to: [6; 32],
             amount: 111,
         }],
         vec![
             Transaction {
-                from: "Address7".to_string(),
-                to: "Address8".to_string(),
+                from: [7; 32],
+                to: [8; 32],
                 amount: 25,
             },
             Transaction {
-                from: "Address9".to_string(),
-                to: "Address10".to_string(),
+                from: [9; 32],
+                to: [10; 32],
                 amount: 90,
             },
         ],
         vec![Transaction {
-            from: "Address11".to_string(),
-            to: "Address12".to_string(),
+            from: [11; 32],
+            to: [12; 32],
             amount: 11,
         }],
         vec![
             Transaction {
-                from: "Address13".to_string(),
-                to: "Address14".to_string(),
+                from: [13; 32],
+                to: [14; 32],
                 amount: 250,
             },
             Transaction {
-                from: "Address15".to_string(),
-                to: "Address16".to_string(),
+                from: [15; 32],
+                to: [16; 32],
                 amount: 159,
             },
         ],
@@ -90,7 +89,6 @@ fn main() {
         println!("Предложение блока #{} ({} транзакций):", i + 1, txs.len());
         // Добавление блока через консенсус
         let added = consensus.propose_block(txs, &mut blockchain);
-
         // Вывод результата голосования
         if added {
             println!("  • Блок принят и добавлен.");
@@ -121,14 +119,12 @@ fn main() {
         .iter()
         .map(|block| serialize_block(block).unwrap().len())
         .sum();
-
     let block_count = blockchain.blocks.len();
     let average_size = if block_count > 0 {
         serialized_total / block_count
     } else {
         0
     };
-
     // Вывод статистики
     println!("Отчёт о сети:");
     println!("• Всего блоков: {}", block_count);
@@ -150,10 +146,15 @@ fn main() {
         println!("   Хеш: {}", hex::encode(block.hash));
         println!("   Транзакций: {}", block.transactions.len());
         for tx in &block.transactions {
-            println!("     • {} → {} : {}", tx.from, tx.to, tx.amount);
+            println!(
+                "     • {} → {} : {}",
+                hex::encode(tx.from),
+                hex::encode(tx.to),
+                tx.amount
+            );
         }
     } else {
-        println!(".  Блок #{} не найден.", block_index);
+        println!("  Блок #{} не найден.", block_index);
     }
 
     // 8: Сериализация и десериализация (bincode)
@@ -187,7 +188,6 @@ fn main() {
     match serialize_blockchain(&blockchain) {
         Ok(encoded_chain) => {
             println!("   Успешно! Размер: {} байт.", encoded_chain.len());
-
             match deserialize_blockchain(&encoded_chain) {
                 Ok(deserialized_chain) => {
                     println!("   Десериализация прошла успешно.");
@@ -228,7 +228,6 @@ fn main() {
     match serialize_blockchain(&blockchain) {
         Ok(encoded_chain) => {
             println!("   Успешно! Размер: {} байт.", encoded_chain.len());
-
             match deserialize_blockchain(&encoded_chain) {
                 Ok(deserialized_chain) => {
                     println!("   Десериализация прошла успешно.");
